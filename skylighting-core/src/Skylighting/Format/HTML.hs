@@ -5,6 +5,8 @@ module Skylighting.Format.HTML (
     , styleToCss
     ) where
 
+import Data.Maybe (fromMaybe)
+import Data.Char (isSpace)
 import Data.List (intersperse, sort)
 import qualified Data.Map as Map
 import qualified Data.Text as Text
@@ -96,10 +98,27 @@ sourceLineToHtml opts lno cont =
                      else customAttribute (fromString "aria-hidden")
                            (fromString "true")) -- see jgm/pandoc#6352
                $ mempty
-           mapM_ (tokenToHtml opts) cont
+           let (whitespace, rest) = splitFirstTextToken cont
+           H.span ! A.class_ (toValue "indentation") $ mapM_ (tokenToHtml opts) $ whitespace
+           if null rest
+              then mempty
+              else H.span ! A.class_ (toValue "lineStart")
+                          $ do
+                            mapM_ (tokenToHtml opts) $ rest
   where  lineNum = toValue prefixedLineNo
          lineRef = toValue ('#':prefixedLineNo)
          prefixedLineNo = Text.unpack (lineIdPrefix opts) <> show (lineNo lno)
+
+-- Split a SourceLine into 2 parts: leading whitespace, and the rest
+splitFirstTextToken :: [Token] -> (Maybe Token, [Token])
+splitFirstTextToken ((NormalTok, txt):xs) =
+  if Text.null first
+    then (Nothing, (NormalTok, txt):xs)
+    else (Just (NormalTok, first), (NormalTok, rest):xs)
+    where (first, rest) = (Text.splitAt firstChar txt)
+          firstChar = fromMaybe 0 $ Text.findIndex (not . isSpace) txt
+
+splitFirstTextToken tokens = (Nothing, tokens)
 
 tokenToHtml :: FormatOptions -> Token -> Html
 tokenToHtml _ (NormalTok, txt)  = toHtml txt
@@ -187,7 +206,8 @@ styleToCss f = unlines $
           , "}"
           , "@media print {"
           , "pre > code.sourceCode { white-space: pre-wrap; }"
-          , "pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }"
+          , "pre > code.sourceCode > span { padding-left: 8ch; }"
+          , "pre > code.sourceCode > span .lineStart { margin-left: -8ch; }"
           , "}"
           ]
          linkspec = [ "@media screen {"
